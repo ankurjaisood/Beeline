@@ -19,9 +19,9 @@
 		'Berkeley to downtown Oakland by 2pm'
 	];
 
-	// Auto-select first route when routes are loaded
+	// Auto-select all routes when routes are loaded
 	$: if ($sortedRoutes.length > 0 && $selectedRoutes.length === 0) {
-		toggleRouteSelection($sortedRoutes[0]);
+		selectedRoutes.set($sortedRoutes);
 	}
 
 	async function handleSearch() {
@@ -36,6 +36,7 @@
 
 		try {
 			const response = await searchRoutes(query);
+			console.log('API Response:', response);
 			routeResponse.set(response);
 		} catch (err) {
 			error.set(err instanceof Error ? err.message : 'An error occurred');
@@ -276,7 +277,7 @@
 								<RoutePreview
 									{route}
 									isSelected={$selectedRoutes.find(r => r.id === route.id)}
-									onClick={() => handleSelectRoute(route)}
+									onChange={() => handleSelectRoute(route)}
 								/>
 							{/each}
 						</div>
@@ -289,7 +290,7 @@
 		<main class="flex-1 overflow-y-auto flex flex-col">
 			<!-- Map (60% height) -->
 			<div class="h-[60vh] border-b border-gray-200 dark:border-gray-700">
-				<Map route={$selectedRoutes[0]} height="100%" />
+				<Map routes={$selectedRoutes} height="100%" />
 			</div>
 
 			{#if $selectedRoutes[0]}
