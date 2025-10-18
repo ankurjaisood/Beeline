@@ -4,7 +4,7 @@
 	import RouteTimeline from '$lib/components/RouteTimeline.svelte';
 	import RoutePreview from '$lib/components/RoutePreview.svelte';
 	import { searchRoutes } from '$lib/services/api';
-	import { routeResponse, selectedRoute, sortedRoutes, selectRoute, filters, isLoading, error } from '$lib/stores/routeStore';
+	import { routeResponse, selectedRoutes, sortedRoutes, toggleRouteSelection, filters, isLoading, error } from '$lib/stores/routeStore';
 	import { theme, toggleTheme } from '$lib/stores/themeStore';
 	import type { OptimizationPreference } from '$lib/types';
 
@@ -20,8 +20,8 @@
 	];
 
 	// Auto-select first route when routes are loaded
-	$: if ($sortedRoutes.length > 0 && !$selectedRoute) {
-		selectRoute($sortedRoutes[0]);
+	$: if ($sortedRoutes.length > 0 && $selectedRoutes.length === 0) {
+		toggleRouteSelection($sortedRoutes[0]);
 	}
 
 	async function handleSearch() {
@@ -70,7 +70,7 @@
 	}
 
 	function handleSelectRoute(route: any) {
-		selectRoute(route);
+		toggleRouteSelection(route);
 	}
 </script>
 
@@ -275,7 +275,7 @@
 							{#each $sortedRoutes as route (route.id)}
 								<RoutePreview
 									{route}
-									isSelected={$selectedRoute?.id === route.id}
+									isSelected={$selectedRoutes.find(r => r.id === route.id)}
 									onClick={() => handleSelectRoute(route)}
 								/>
 							{/each}
@@ -289,15 +289,15 @@
 		<main class="flex-1 overflow-y-auto flex flex-col">
 			<!-- Map (60% height) -->
 			<div class="h-[60vh] border-b border-gray-200 dark:border-gray-700">
-				<Map route={$selectedRoute} height="100%" />
+				<Map route={$selectedRoutes[0]} height="100%" />
 			</div>
 
-			{#if $selectedRoute}
+			{#if $selectedRoutes[0]}
 				<div class="h-[40vh] flex-1 flex">
 					<!-- Timeline (40% height) -->
 					<div class="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900 p-6">
 						<RouteTimeline
-							route={$selectedRoute}
+							route={$selectedRoutes[0]}
 							onSelectRoute={() => {
 								alert('Route selected! (Connect to navigation app)');
 							}}
