@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "googlemaps-claude": {
+      "type": "stdio",
+      "command": "/Users/jaisood/Git/Beeline/venv/bin/python",
+      "args": ["/Users/jaisood/Git/Beeline/llm_service/mcp_server.py"]
+    }
+  }
+}
