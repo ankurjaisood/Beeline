@@ -1,0 +1,22 @@
+{
+  "origin": "San Jose, CA",
+  "destination": "Salesforce Tower, San Francisco, CA",
+  "arrival_time": "2025-10-18T10:00:00-07:00",
+  "preferences": {
+    "modes": {
+      "driving": true,
+      "parking": true,
+      "transit": ["Caltrain", "BART"],
+      "rideshare": [],
+      "micromobility": ["walking"],
+      "combinations": ["drive_and_ride"]
+    },
+    "optimize_for": "time",
+    "constraints": {
+      "max_walking_distance": 0.5,
+      "max_cost": null,
+      "avoid_tolls": false,
+      "accessible": false
+    }
+  }
+}
