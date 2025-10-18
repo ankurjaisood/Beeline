@@ -40,8 +40,10 @@ if os.getenv('ANTHROPIC_API_KEY'):
 
 if os.getenv('GEMINI_API_KEY'):
     genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-    gemini_model = genai.GenerativeModel('gemini-2.5-flash')
-    logger.info("Gemini API initialized")
+    # Using gemini-2.5-flash-lite for ultra-fast responses (optimized for low latency)
+    # Alternatives: 'gemini-2.5-flash' (balanced) or 'gemini-2.0-flash-exp' (experimental)
+    gemini_model = genai.GenerativeModel('gemini-2.5-flash-lite')
+    logger.info("Gemini API initialized with gemini-2.5-flash-lite")
 
 class SearchRequest(BaseModel):
     query: str
@@ -129,9 +131,22 @@ class RoutePlanner:
         # Generate routes
         routes = await self._generate_routes_with_llm(parsed_query, maps_data)
 
+        # Enrich routes with coordinates from Google Maps
+        enriched_routes = await self._enrich_routes_with_coords(routes, maps_data)
+
+        # Log to verify coordinates are added
+        if enriched_routes and len(enriched_routes) > 0:
+            first_route = enriched_routes[0]
+            if "legs" in first_route and len(first_route["legs"]) > 0:
+                first_leg = first_route["legs"][0]
+                has_coords = "from_coords" in first_leg and "to_coords" in first_leg
+                logger.info(f"Route enrichment: First leg has coordinates: {has_coords}")
+                if has_coords:
+                    logger.info(f"Sample coords: from={first_leg['from_coords']}, to={first_leg['to_coords']}")
+
         return {
             "query": parsed_query,
-            "routes": routes,
+            "routes": enriched_routes,
             "metadata": {
                 "timestamp": datetime.now().isoformat(),
                 "query_text": query
@@ -168,24 +183,29 @@ class RoutePlanner:
 Query: "{query}"
 
 Extract and return ONLY a JSON object (no markdown, no explanation) with these fields:
-- origin: starting location
-- destination: ending location
-- waypoints: array of intermediate stops (if mentioned)
-- arrival_time: target arrival time (if mentioned, in 24h format like "10:00")
-- preferences: array of user preferences (e.g., "no parking fees", "prefer BART", "willing to drive")
-- constraints: array of constraints (e.g., "must arrive by 10am")
+- origin: starting location (REQUIRED - must be a valid location name as a string, NEVER use null/None)
+- destination: ending location (REQUIRED - must be a valid location name as a string, NEVER use null/None)
+- waypoints: array of intermediate stops (empty array [] if none mentioned)
+- arrival_time: target arrival time (string in 24h format like "10:00", or empty string "" if not mentioned)
+- preferences: array of user preferences (empty array [] if none)
+- constraints: array of constraints (empty array [] if none)
 
-Example output:
-{{
-  "origin": "San Jose",
-  "destination": "Salesforce Tower",
-  "waypoints": [],
-  "arrival_time": "10:00",
-  "preferences": ["drive to transit station"],
-  "constraints": ["arrive by 10am"]
-}}
+CRITICAL RULES:
+1. origin MUST be a non-empty string (e.g., "San Jose", "Current location", "Palo Alto")
+2. destination MUST be a non-empty string (e.g., "San Francisco", "Salesforce Tower")
+3. If origin is not stated, use "Current location" or infer from context
+4. If destination is not clear, use the most prominent location mentioned
+5. NEVER use null, None, or empty string for origin or destination
 
-Return only the JSON, nothing else."""
+Example 1:
+Query: "Get me from San Jose to Salesforce Tower by 10 am"
+Output: {{"origin": "San Jose", "destination": "Salesforce Tower", "waypoints": [], "arrival_time": "10:00", "preferences": [], "constraints": ["arrive by 10am"]}}
+
+Example 2:
+Query: "I need to get to Oracle Park by 7pm"
+Output: {{"origin": "Current location", "destination": "Oracle Park", "waypoints": [], "arrival_time": "19:00", "preferences": [], "constraints": ["arrive by 7pm"]}}
+
+Return only the JSON object, nothing else."""
 
         try:
             content = await self._call_llm(prompt)
@@ -198,19 +218,26 @@ Return only the JSON, nothing else."""
                 content = content.strip()
 
             parsed = json.loads(content)
+
+            # Validate required fields
+            if not parsed.get("origin") or parsed.get("origin") in [None, "None", "null"]:
+                logger.warning(f"Invalid origin in parsed query: {parsed.get('origin')}")
+                raise ValueError("Origin is required but was not found in query")
+
+            if not parsed.get("destination") or parsed.get("destination") in [None, "None", "null"]:
+                logger.warning(f"Invalid destination in parsed query: {parsed.get('destination')}")
+                raise ValueError("Destination is required but was not found in query")
+
             logger.info(f"Parsed query with {self.model_type}: {parsed}")
             return parsed
 
         except Exception as e:
-            logger.warning(f"LLM parsing failed: {e}, using fallback")
-            return {
-                "origin": "San Jose",
-                "destination": "San Francisco",
-                "waypoints": [],
-                "arrival_time": None,
-                "preferences": [],
-                "constraints": []
-            }
+            logger.warning(f"LLM parsing failed: {e}")
+            # Try to extract basic info from query
+            query_lower = query.lower()
+
+            # Return error if we can't parse
+            raise ValueError(f"Unable to parse query. Please specify both origin and destination clearly. Error: {e}")
 
     async def _get_maps_data(self, parsed_query: dict) -> dict:
         """Get route data from Google Maps APIs."""
@@ -392,6 +419,81 @@ Remember: Only use driving as the first leg. Optimize for fewer transfers and mi
                 ]
             }
         ]
+
+    async def _enrich_routes_with_coords(self, routes: list, maps_data: dict) -> list:
+        """Add coordinates to route legs by geocoding the locations."""
+        enriched_routes = []
+
+        # Cache to avoid redundant geocoding calls
+        geocode_cache = {}
+
+        for route in routes:
+            enriched_route = route.copy()
+            enriched_legs = []
+
+            for leg in route.get("legs", []):
+                enriched_leg = leg.copy()
+
+                # Geocode the from and to locations
+                try:
+                    from_location = leg.get("from", "")
+                    to_location = leg.get("to", "")
+
+                    # Use cache to avoid duplicate API calls
+                    if from_location not in geocode_cache:
+                        from_geocode = self.gmaps.geocode(from_location)
+                        geocode_cache[from_location] = from_geocode
+                    else:
+                        from_geocode = geocode_cache[from_location]
+
+                    if to_location not in geocode_cache:
+                        to_geocode = self.gmaps.geocode(to_location)
+                        geocode_cache[to_location] = to_geocode
+                    else:
+                        to_geocode = geocode_cache[to_location]
+
+                    if from_geocode and len(from_geocode) > 0:
+                        from_coords = from_geocode[0]["geometry"]["location"]
+                        enriched_leg["from_coords"] = {
+                            "lat": from_coords["lat"],
+                            "lng": from_coords["lng"]
+                        }
+
+                    if to_geocode and len(to_geocode) > 0:
+                        to_coords = to_geocode[0]["geometry"]["location"]
+                        enriched_leg["to_coords"] = {
+                            "lat": to_coords["lat"],
+                            "lng": to_coords["lng"]
+                        }
+
+                    # Skip polyline fetching to speed up response
+                    # Frontend can draw straight lines between coordinates
+                    # Uncomment below if you need actual route polylines
+                    """
+                    if "from_coords" in enriched_leg and "to_coords" in enriched_leg:
+                        try:
+                            directions = self.gmaps.directions(
+                                from_location,
+                                to_location,
+                                mode="driving" if leg.get("mode") == "drive" else "transit"
+                            )
+                            if directions and len(directions) > 0:
+                                polyline = directions[0].get("overview_polyline", {}).get("points", "")
+                                if polyline:
+                                    enriched_leg["polyline"] = polyline
+                        except Exception as e:
+                            logger.warning(f"Could not get polyline for leg: {e}")
+                    """
+
+                except Exception as e:
+                    logger.warning(f"Could not geocode locations for leg {leg.get('from')} -> {leg.get('to')}: {e}")
+
+                enriched_legs.append(enriched_leg)
+
+            enriched_route["legs"] = enriched_legs
+            enriched_routes.append(enriched_route)
+
+        return enriched_routes
 
 def main():
     """Main function to run the API server."""
