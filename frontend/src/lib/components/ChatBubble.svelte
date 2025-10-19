@@ -1,13 +1,14 @@
 <script lang="ts">
-	import { MessageCircle, X, Send, Minimize2 } from 'lucide-svelte';
+	import { MessageCircle, X, Send, Minimize2, Search } from 'lucide-svelte';
 	import { onMount } from 'svelte';
 
-	export let onSendMessage: (message: string) => Promise<string> = async () => '';
+	export let onSendMessage: (message: string) => Promise<{ response: string; action?: any }> = async () => ({ response: '' });
+	export let onExecuteAction: (action: any) => void = () => {};
 
 	let isOpen = false;
 	let isMinimized = false;
 	let message = '';
-	let messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+	let messages: Array<{ role: 'user' | 'assistant'; content: string; action?: any }> = [];
 	let chatContainer: HTMLDivElement;
 	let isLoading = false;
 
@@ -53,10 +54,14 @@
 
 		try {
 			// Get AI response
-			const response = await onSendMessage(userMessage);
+			const result = await onSendMessage(userMessage);
 
-			// Add assistant message
-			messages = [...messages, { role: 'assistant', content: response }];
+			// Add assistant message with optional action
+			messages = [...messages, {
+				role: 'assistant',
+				content: result.response,
+				action: result.action
+			}];
 		} catch (error) {
 			messages = [
 				...messages,
@@ -135,7 +140,7 @@
 				class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900"
 			>
 				{#each messages as msg}
-					<div class="flex {msg.role === 'user' ? 'justify-end' : 'justify-start'}">
+					<div class="flex {msg.role === 'user' ? 'justify-end' : 'justify-start'} flex-col {msg.role === 'assistant' ? 'items-start' : 'items-end'} gap-2">
 						<div
 							class="max-w-[80%] rounded-2xl px-3 py-1.5 {msg.role === 'user'
 								? 'bg-primary-600 text-white'
@@ -143,6 +148,17 @@
 						>
 							<p class="text-xs whitespace-pre-wrap">{msg.content}</p>
 						</div>
+
+						<!-- Action Button -->
+						{#if msg.role === 'assistant' && msg.action}
+							<button
+								on:click={() => onExecuteAction(msg.action)}
+								class="flex items-center gap-2 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-medium transition-colors shadow-sm"
+							>
+								<Search class="w-3 h-3" />
+								Search with these criteria
+							</button>
+						{/if}
 					</div>
 				{/each}
 
@@ -182,7 +198,7 @@
 					</button>
 				</div>
 				<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
-					Try: "Show me cheaper options" or "Avoid BART"
+					Try: "Which route is fastest?" or "Compare the costs" or "What's the greenest option?"
 				</p>
 			</div>
 		{/if}

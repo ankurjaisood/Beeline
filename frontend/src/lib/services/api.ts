@@ -42,11 +42,11 @@ export async function searchRoutes(query: string): Promise<RouteResponse> {
 /**
  * Chat with the LLM assistant about routes and preferences
  */
-export async function chatWithAssistant(message: string, context?: any): Promise<string> {
+export async function chatWithAssistant(message: string, context?: any): Promise<{ response: string; action?: any }> {
 	if (MOCK_MODE) {
 		// Mock response
 		await new Promise((resolve) => setTimeout(resolve, 500));
-		return "I can help you with that! (Mock mode - connect to real API for actual assistance)";
+		return { response: "I can help you with that! (Mock mode - connect to real API for actual assistance)" };
 	}
 
 	try {
@@ -65,7 +65,10 @@ export async function chatWithAssistant(message: string, context?: any): Promise
 		}
 
 		const data = await response.json();
-		return data.response;
+		return {
+			response: data.response,
+			action: data.action
+		};
 	} catch (error) {
 		console.error('Failed to chat with assistant:', error);
 		throw new Error('Unable to reach the assistant. Please try again.');

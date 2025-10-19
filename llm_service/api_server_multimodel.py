@@ -62,6 +62,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     metadata: dict
+    action: Optional[dict] = None  # Optional action for the frontend to execute
 
 @app.get("/")
 async def root():
@@ -140,21 +141,80 @@ async def chat(request: ChatRequest):
             else:
                 raise HTTPException(status_code=503, detail="No LLM models available")
 
-        # Create a prompt for the LLM
-        context_str = json.dumps(request.context) if request.context else "No context provided"
+        # Create a context-aware prompt for the LLM
+        context = request.context or {}
+
+        # Build a human-readable context summary
+        context_summary = []
+
+        if context.get("query"):
+            query = context["query"]
+            context_summary.append(f"Current trip: {query.get('origin', 'Unknown')} to {query.get('destination', 'Unknown')}")
+            if query.get("arrival_time"):
+                context_summary.append(f"Target arrival: {query.get('arrival_time')}")
+
+        if context.get("selectedRoute"):
+            selected = context["selectedRoute"]
+            context_summary.append(f"Selected route: {selected.get('summary', 'N/A')} ({selected.get('total_duration', 0)} min, ${selected.get('total_cost', 0):.2f})")
+
+        if context.get("routes"):
+            routes = context["routes"]
+            context_summary.append(f"Available routes: {len(routes)} options found")
+
+            # Add brief summary of each route
+            for i, route in enumerate(routes[:3], 1):  # Show up to 3 routes
+                legs_summary = " → ".join([leg.get("mode", "?") for leg in route.get("legs", [])])
+                context_summary.append(
+                    f"  Route {i}: {route.get('summary', 'N/A')} - "
+                    f"{route.get('total_duration', 0)} min, ${route.get('total_cost', 0):.2f} "
+                    f"({legs_summary})"
+                )
+
+        if context.get("filters"):
+            filters = context["filters"]
+            active_modes = [mode for mode, enabled in filters.get("modes", {}).items() if enabled]
+            if active_modes:
+                context_summary.append(f"Active modes: {', '.join(active_modes)}")
+            context_summary.append(f"Optimizing for: {filters.get('optimize', 'time')}")
+            if filters.get("avoidTolls"):
+                context_summary.append("Avoiding tolls")
+            if filters.get("accessible"):
+                context_summary.append("Accessible routes only")
+
+        context_text = "\n".join(context_summary) if context_summary else "No active route search"
 
         prompt = f"""You are a helpful transit assistant for Beeline, a multi-modal transit routing app.
 
-User message: "{request.message}"
+CURRENT CONTEXT:
+{context_text}
 
-Context: {context_str}
+USER MESSAGE: "{request.message}"
 
-Provide a helpful, conversational response. If the user wants to:
-- Modify their route (e.g., "show cheaper options", "avoid BART", "faster route")
-- Ask about transit options
-- Get recommendations
+Your role is to help users with their transit journey. You can:
+1. Explain and compare route options based on the context above
+2. Recommend specific routes based on user preferences (fastest, cheapest, greenest, etc.)
+3. Suggest filter changes to find better routes (e.g., "try enabling rideshare for faster options")
+4. Answer questions about specific legs, modes, or transit lines
+5. Help users understand trade-offs (time vs cost vs environmental impact)
 
-Keep your response concise (2-3 sentences max) and actionable. Be friendly and helpful."""
+IMPORTANT GUIDELINES:
+- Reference specific details from the context (route times, costs, modes)
+- Be conversational and friendly, not robotic
+- Keep responses concise (2-4 sentences max)
+- If suggesting changes, be specific (e.g., "Route 2 saves you $5 but takes 10 min longer")
+- If the user wants to search with different criteria (e.g., "show cheaper options", "avoid BART", "find faster routes"),
+  you can offer to run a new search for them
+
+RESPONSE FORMAT:
+If you want to offer a new search, end your response with:
+[ACTION: SEARCH | query: "natural language query here"]
+
+Examples:
+- User asks "show me cheaper options" → End with: [ACTION: SEARCH | query: "Get me from San Jose to Salesforce Tower optimizing for cost"]
+- User asks "avoid BART" → End with: [ACTION: SEARCH | query: "Get me from San Jose to Salesforce Tower without using BART"]
+- User asks "what about rideshare?" → End with: [ACTION: SEARCH | query: "Get me from San Jose to Salesforce Tower using rideshare"]
+
+Provide your response:"""
 
         # Call the LLM
         if model_choice == "gemini":
@@ -172,8 +232,28 @@ Keep your response concise (2-3 sentences max) and actionable. Be friendly and h
 
         logger.info(f"Chat response generated using {model_choice}")
 
+        # Parse action if present
+        action = None
+        display_text = response_text
+
+        if "[ACTION: SEARCH |" in response_text:
+            # Extract the action
+            parts = response_text.split("[ACTION: SEARCH |")
+            display_text = parts[0].strip()
+            action_part = parts[1].split("]")[0].strip()
+
+            # Extract query
+            if "query:" in action_part:
+                query = action_part.split("query:", 1)[1].strip().strip('"').strip("'")
+                action = {
+                    "type": "search",
+                    "query": query
+                }
+                logger.info(f"Extracted search action: {query}")
+
         return ChatResponse(
-            response=response_text,
+            response=display_text,
+            action=action,
             metadata={
                 "model_used": model_choice,
                 "timestamp": datetime.now().isoformat()
