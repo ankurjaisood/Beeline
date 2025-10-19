@@ -1,10 +1,24 @@
 <script lang="ts">
-	import { Car, Train, FootprintsIcon, Clock, DollarSign } from 'lucide-svelte';
+	import { Car, Train, FootprintsIcon, Clock, DollarSign, Eye, EyeOff } from 'lucide-svelte';
 	import type { RouteOption } from '$lib/types';
 
 	export let route: RouteOption;
 	export let isSelected: boolean = false;
-	export let onChange: () => void;
+	export let isVisible: boolean = true;
+	export let routeIndex: number = 0;
+	export let onClick: () => void;
+	export let onToggleVisibility: () => void;
+
+	const routeColors = [
+		'#3B82F6', // blue
+		'#10B981', // green
+		'#F59E0B', // amber
+		'#EF4444', // red
+		'#8B5CF6', // purple
+		'#EC4899', // pink
+	];
+
+	const routeColor = routeColors[routeIndex % routeColors.length];
 
 	// Get unique modes in this route
 	const uniqueModes = [...new Set(route.legs.map(leg => leg.mode))];
@@ -21,18 +35,26 @@
 </script>
 
 <div
-	class="w-full text-left p-4 rounded-lg border-2 transition-all {isSelected
+	class="w-full text-left p-4 rounded-lg border-2 transition-all cursor-pointer {isSelected
 		? 'bg-primary-50 dark:bg-primary-900/20 border-primary-500 shadow-md'
 		: 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-sm'}"
 >
-	<div class="flex items-start gap-4">
-		<input
-			type="checkbox"
-			class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-			bind:checked={isSelected}
-			on:change={onChange}
-		/>
-		<div class="flex-1">
+	<div class="flex items-start gap-3">
+		<!-- Route color indicator -->
+		<div class="mt-1 w-4 h-4 rounded-full flex-shrink-0" style="background-color: {routeColor};"></div>
+
+		<button
+			on:click|stopPropagation={onToggleVisibility}
+			class="mt-1 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+			aria-label={isVisible ? 'Hide route on map' : 'Show route on map'}
+		>
+			{#if isVisible}
+				<Eye class="w-4 h-4 text-primary-600 dark:text-primary-400" />
+			{:else}
+				<EyeOff class="w-4 h-4 text-gray-400 dark:text-gray-500" />
+			{/if}
+		</button>
+		<div class="flex-1" on:click={onClick} role="button" tabindex="0" on:keypress={(e) => e.key === 'Enter' && onClick()}>
 			<!-- Route modes -->
 			<div class="flex items-center gap-1 mb-2">
 				{#each uniqueModes as mode}

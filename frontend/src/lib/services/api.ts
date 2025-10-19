@@ -40,6 +40,39 @@ export async function searchRoutes(query: string): Promise<RouteResponse> {
 }
 
 /**
+ * Chat with the LLM assistant about routes and preferences
+ */
+export async function chatWithAssistant(message: string, context?: any): Promise<string> {
+	if (MOCK_MODE) {
+		// Mock response
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		return "I can help you with that! (Mock mode - connect to real API for actual assistance)";
+	}
+
+	try {
+		const response = await fetch(`${LLM_API_URL}/api/chat`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({ message, context: context || {} })
+		});
+
+		if (!response.ok) {
+			const errorData = await response.text();
+			console.error('Chat API error:', errorData);
+			throw new Error(`Chat API error: ${response.statusText}`);
+		}
+
+		const data = await response.json();
+		return data.response;
+	} catch (error) {
+		console.error('Failed to chat with assistant:', error);
+		throw new Error('Unable to reach the assistant. Please try again.');
+	}
+}
+
+/**
  * Health check for backend API service
  */
 export async function checkAPIHealth(): Promise<boolean> {

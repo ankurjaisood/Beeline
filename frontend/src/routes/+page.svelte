@@ -4,7 +4,7 @@
 	import RouteTimeline from '$lib/components/RouteTimeline.svelte';
 	import RoutePreview from '$lib/components/RoutePreview.svelte';
 	import { searchRoutes } from '$lib/services/api';
-	import { routeResponse, selectedRoute, sortedRoutes, selectRoute, filters, isLoading, error } from '$lib/stores/routeStore';
+	import { routeResponse, selectedRoute, sortedRoutes, selectRoute, filters, isLoading, error, routeVisibility, toggleRouteVisibility, setAllRoutesVisible } from '$lib/stores/routeStore';
 	import { theme, toggleTheme } from '$lib/stores/themeStore';
 	import type { OptimizationPreference } from '$lib/types';
 
@@ -19,10 +19,21 @@
 		'Berkeley to downtown Oakland by 2pm'
 	];
 
-	// Auto-select first route when routes are loaded
-	$: if ($sortedRoutes.length > 0 && !$selectedRoute) {
-		selectRoute($sortedRoutes[0]);
+	// Auto-select first route when routes are loaded or change
+	// Keep track of previous route response to detect when new search results arrive
+	let previousRouteResponseId: string | null = null;
+	$: if ($sortedRoutes.length > 0) {
+		const currentId = $routeResponse?.query?.origin + $routeResponse?.query?.destination;
+		if (currentId !== previousRouteResponseId) {
+			previousRouteResponseId = currentId || null;
+			selectRoute($sortedRoutes[0]);
+			// Make all routes visible by default when new routes are loaded
+			setAllRoutesVisible($sortedRoutes, true);
+		}
 	}
+
+	// Derived store for visible routes to pass to the map
+	$: visibleRoutes = $sortedRoutes.filter(route => $routeVisibility[route.id] !== false);
 
 	async function handleSearch() {
 		if (!query.trim()) {
@@ -272,11 +283,14 @@
 							{$sortedRoutes.length} {$sortedRoutes.length === 1 ? 'Route' : 'Routes'} Found
 						</h3>
 						<div class="space-y-2">
-							{#each $sortedRoutes as route (route.id)}
+							{#each $sortedRoutes as route, index (route.id)}
 								<RoutePreview
 									{route}
+									routeIndex={index}
 									isSelected={$selectedRoute?.id === route.id}
+									isVisible={$routeVisibility[route.id] !== false}
 									onClick={() => handleSelectRoute(route)}
+									onToggleVisibility={() => toggleRouteVisibility(route.id)}
 								/>
 							{/each}
 						</div>
@@ -289,7 +303,7 @@
 		<main class="flex-1 overflow-y-auto flex flex-col">
 			<!-- Map (60% height) -->
 			<div class="h-[60vh] border-b border-gray-200 dark:border-gray-700">
-				<Map route={$selectedRoute} height="100%" />
+				<Map routes={visibleRoutes} selectedRoute={$selectedRoute} height="100%" />
 			</div>
 
 			{#if $selectedRoute}
@@ -298,6 +312,7 @@
 					<div class="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900 p-6">
 						<RouteTimeline
 							route={$selectedRoute}
+							routeIndex={$sortedRoutes.findIndex(r => r.id === $selectedRoute?.id)}
 							onSelectRoute={() => {
 								alert('Route selected! (Connect to navigation app)');
 							}}

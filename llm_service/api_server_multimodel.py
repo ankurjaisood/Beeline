@@ -54,6 +54,15 @@ class SearchResponse(BaseModel):
     routes: list
     metadata: dict
 
+class ChatRequest(BaseModel):
+    message: str
+    context: dict = {}  # Optional context about current routes, filters, etc.
+    model: str = "auto"
+
+class ChatResponse(BaseModel):
+    response: str
+    metadata: dict
+
 @app.get("/")
 async def root():
     """Health check endpoint."""
@@ -110,6 +119,69 @@ async def search_routes(request: SearchRequest):
 
     except Exception as e:
         logger.exception(f"Error processing search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    """
+    Chat endpoint for conversational assistance about routes.
+    Can help modify queries, suggest alternatives, answer questions.
+    """
+    try:
+        logger.info(f"Processing chat message: {request.message[:50]}...")
+
+        # Determine which model to use
+        model_choice = request.model
+        if model_choice == "auto":
+            if gemini_model:
+                model_choice = "gemini"
+            elif claude_client:
+                model_choice = "claude"
+            else:
+                raise HTTPException(status_code=503, detail="No LLM models available")
+
+        # Create a prompt for the LLM
+        context_str = json.dumps(request.context) if request.context else "No context provided"
+
+        prompt = f"""You are a helpful transit assistant for Beeline, a multi-modal transit routing app.
+
+User message: "{request.message}"
+
+Context: {context_str}
+
+Provide a helpful, conversational response. If the user wants to:
+- Modify their route (e.g., "show cheaper options", "avoid BART", "faster route")
+- Ask about transit options
+- Get recommendations
+
+Keep your response concise (2-3 sentences max) and actionable. Be friendly and helpful."""
+
+        # Call the LLM
+        if model_choice == "gemini":
+            response_obj = gemini_model.generate_content(prompt)
+            response_text = response_obj.text.strip()
+        elif model_choice == "claude":
+            response_obj = claude_client.messages.create(
+                model="claude-3-5-sonnet-20250219",
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            response_text = response_obj.content[0].text.strip()
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown model: {model_choice}")
+
+        logger.info(f"Chat response generated using {model_choice}")
+
+        return ChatResponse(
+            response=response_text,
+            metadata={
+                "model_used": model_choice,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+    except Exception as e:
+        logger.exception(f"Error processing chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 class RoutePlanner:
@@ -466,24 +538,31 @@ Remember: Only use driving as the first leg. Optimize for fewer transfers and mi
                             "lng": to_coords["lng"]
                         }
 
-                    # Skip polyline fetching to speed up response
-                    # Frontend can draw straight lines between coordinates
-                    # Uncomment below if you need actual route polylines
-                    """
+                    # Fetch polylines for accurate route rendering
                     if "from_coords" in enriched_leg and "to_coords" in enriched_leg:
                         try:
+                            # Map leg mode to Google Maps mode
+                            leg_mode = leg.get("mode", "driving")
+                            gmaps_mode = "driving"
+                            if leg_mode in ["walk"]:
+                                gmaps_mode = "walking"
+                            elif leg_mode in ["bike", "scooter"]:
+                                gmaps_mode = "bicycling"
+                            elif leg_mode in ["transit"]:
+                                gmaps_mode = "transit"
+
                             directions = self.gmaps.directions(
                                 from_location,
                                 to_location,
-                                mode="driving" if leg.get("mode") == "drive" else "transit"
+                                mode=gmaps_mode
                             )
                             if directions and len(directions) > 0:
                                 polyline = directions[0].get("overview_polyline", {}).get("points", "")
                                 if polyline:
                                     enriched_leg["polyline"] = polyline
+                                    logger.info(f"Added polyline for {leg_mode} leg: {from_location} -> {to_location}")
                         except Exception as e:
                             logger.warning(f"Could not get polyline for leg: {e}")
-                    """
 
                 except Exception as e:
                     logger.warning(f"Could not geocode locations for leg {leg.get('from')} -> {leg.get('to')}: {e}")

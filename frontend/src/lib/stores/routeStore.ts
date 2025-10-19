@@ -10,6 +10,9 @@ export const selectedRoutes = writable<RouteOption[]>([]);
 // Store for single selected route (for main view)
 export const selectedRoute = writable<RouteOption | null>(null);
 
+// Store for route visibility (for map display)
+export const routeVisibility = writable<Record<string, boolean>>({});
+
 // Store for loading state
 export const isLoading = writable(false);
 
@@ -122,4 +125,19 @@ export function toggleRouteSelection(route: RouteOption) {
 			return routes.filter(r => r.id !== route.id);
 		}
 	});
+}
+
+export function toggleRouteVisibility(routeId: string) {
+	routeVisibility.update(visibility => ({
+		...visibility,
+		[routeId]: !visibility[routeId]
+	}));
+}
+
+export function setAllRoutesVisible(routes: RouteOption[], visible: boolean = true) {
+	const visibility: Record<string, boolean> = {};
+	routes.forEach(route => {
+		visibility[route.id] = visible;
+	});
+	routeVisibility.set(visibility);
 }
